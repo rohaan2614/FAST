@@ -218,4 +218,6 @@ mnist_plot.py
 figures/
 output
 results
+*.out
+tensorboards/*
 # End of https://www.toptal.com/developers/gitignore/api/python,macos

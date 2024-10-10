@@ -4,23 +4,37 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from shared.agent_utils import Agent, Server, DatasetSplit, data_each_node
+from shared.agent_utils3 import Agent, Server, DatasetSplit, data_each_node
 from tqdm import tqdm
 from shared.client_sampling import client_sampling
 from shared.log import log
 from models import cnn, lstm
-from shared.agent_utils import (
-    local_update_selected_clients_fedavg,
-    local_update_selected_clients_fedprox,
-)
+from shared.agent_utils3 import local_update_selected_clients_fedavg
 from config import get_parms
 from fedlab.utils.dataset.partition import MNISTPartitioner, FMNISTPartitioner
 import preprocess
+import random
+import gc
+gc.enable()
 
+gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "0,1").split(",")
+print('gpus:', gpus)
+
+# Check if there are at least two GPUs available
+if len(gpus) < 2:
+    raise RuntimeError("At least two GPUs are required.")
+
+device_1 = torch.device(f'cuda:{gpus[0]}')  # First GPU
+device_2 = torch.device(f'cuda:{gpus[1]}')  # Second GPU   
+
+# print(f"[GPU 1] Memory before anything: {torch.cuda.memory_allocated(device_1)}")
+# print(f"[GPU 2] Memory before anything: {torch.cuda.memory_allocated(device_2)}") 
 
 args = get_parms("MNIST").parse_args()
 torch.manual_seed(args.seed)
 train_dataset, test_loader, device = preprocess.preprocess(args)
+# print('device 1:', device_1)
+# print('device 2:', device_2)
 
 if args.dataset == "mnist":
     train_dataset_partition = MNISTPartitioner(
@@ -46,6 +60,8 @@ elif args.dataset == "shakespeare":
     dict_users = train_dataset.get_client_dic()
     args.num_clients = len(dict_users)
 
+# print(f"[GPU 1] Memory after init dict_users: {torch.cuda.memory_allocated(device_1)}")
+# print(f"[GPU 2] Memory after init dict_users: {torch.cuda.memory_allocated(device_2)}")
 
 # Create clients and server
 clients = []
@@ -88,15 +104,20 @@ for idx in range(args.num_clients):
             lr=args.lr,
             momentum=0.9,
         )
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(
-            optimizer, milestones=[5000], gamma=0.1
-        )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 
+                                                           gamma=args.lrGamma)
+        
         train_loader = torch.utils.data.DataLoader(
             DatasetSplit(train_dataset, dict_users[idx]),
             batch_size=args.train_batch_size,
             shuffle=True,
         )
-        server = Server(model=cnn.CNN_Cifar10_2(), criterion=criterion, device=device)
+        
+        server = Server(model=cnn.CNN_Cifar10_2(), 
+                        criterion=criterion, 
+                        device_1=device_1, 
+                        device_2=device_2)
+        
     elif args.dataset == "shakespeare":
         model = lstm.CharLSTM()
         criterion = nn.CrossEntropyLoss()
@@ -111,6 +132,9 @@ for idx in range(args.num_clients):
             batch_size=args.train_batch_size,
         )
         server = Server(model=lstm.CharLSTM(), criterion=criterion, device=device)
+        
+    # print(f"[GPU 1] Memory after init server: {torch.cuda.memory_allocated(device_1)}")
+    # print(f"[GPU 2] Memory after init server: {torch.cuda.memory_allocated(device_2)}")
 
     clients.append(
         Agent(
@@ -118,11 +142,14 @@ for idx in range(args.num_clients):
             criterion=criterion,
             optimizer=optimizer,
             train_loader=train_loader,
-            device=device,
+            device_1=device_1,
+            device_2=device_2,
             scheduler=scheduler,
         )
     )
-
+    
+# print(f"[GPU 1] Memory after init clients: {torch.cuda.memory_allocated(device_1)}")
+# print(f"[GPU 2] Memory after init clients: {torch.cuda.memory_allocated(device_2)}")
 
 if args.log_to_tensorboard is not None:
     writer = SummaryWriter(
@@ -133,6 +160,8 @@ if args.log_to_tensorboard is not None:
         )
     )
 
+# print(f"[GPU 1] Memory after init tensorboard: {torch.cuda.memory_allocated(device_1)}")
+# print(f"[GPU 2] Memory after init tensorboard: {torch.cuda.memory_allocated(device_2)}")
 
 list_q = []
 v = 0
@@ -141,28 +170,27 @@ if args.adaptive == 1:
     q = 0
 else:
     q = args.q
-
+    
 print(args)
 with tqdm(total=args.round, desc=f"Training:") as t:
     for round in range(0, args.round):
+        print(f'Round {round+1}')
         # Sample clients
         sampled_clients = client_sampling(
             server.determine_sampling(q, args.sampling_type),
             clients=clients,
             round=round,
         )
+        
         # Training
         [client.pull_model_from_server(server) for client in sampled_clients]
         if args.algo in ["fedavg", "fedavgm"]:
             train_loss, train_acc = local_update_selected_clients_fedavg(
                 clients=sampled_clients, server=server, local_update=args.local_update
             )
-        elif args.algo == "fedprox":
-            train_loss, train_acc = local_update_selected_clients_fedprox(
-                clients=sampled_clients, server=server, local_update=args.local_update
-            )
-
-        server.avg_clients(sampled_clients, weights=None)
+            
+        server.avg_clients(sampled_clients)
+        
         # Evaluation and logging
         if args.log_to_tensorboard is not None:
             writer.add_scalar("Loss/train", train_loss, round)
@@ -185,12 +213,9 @@ with tqdm(total=args.round, desc=f"Training:") as t:
         t.set_postfix({"loss": train_loss, "accuracy": 100.0 * train_acc})
         t.update(1)
 
-print(f"Number of uniform participation rounds: {server.get_num_uni_participation()}")
-print(f"Number of arbitrary participation rounds: {server.get_num_arb_participation()}")
-print(f"Ratio={server.get_num_arb_participation() / args.rounds}")
 
 eval_loss, eval_acc = server.eval(test_loader)
-print(f"Evaluation(final round): {eval_loss=:.3f} {eval_acc=:.3f}")
+# print(f"Evaluation(final round): {eval_loss=:.3f} {eval_acc=:.3f}")
 if args.log_to_tensorboard is not None:
     writer.add_scalar("Loss/test", eval_loss, round)
     writer.add_scalar("Accuracy/test", eval_acc, round)

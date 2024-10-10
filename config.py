@@ -8,12 +8,15 @@ def get_parms(dataset):
     parser.add_argument("--test-batch-size", type=int, default=1000)
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--sampling-type", type=str, default="uniform")
-    parser.add_argument("--local-update", type=int, default=10, help="Local iterations")
+    parser.add_argument("--local-update", type=int, default=1, help="Local iterations")
     parser.add_argument("--num-clients", type=int, default=100, help="Total clients")
-    parser.add_argument("--round", type=int, default=1000, help="Communication rounds")
+    parser.add_argument("--round", type=int, default=5001, help="Communication rounds")
     parser.add_argument("--q", type=float, default=1, help="Probability of snapshot")
     parser.add_argument(
         "--gamma", type=float, default=0.7, help="parameter for adaptive FAST"
+    )
+    parser.add_argument(
+        "--lrGamma", type=float, default=0.7, help="parameter for LR decay"
     )
     parser.add_argument("--alpha", type=float, default=0.1, help="Dirichlet parameter")
     parser.add_argument(

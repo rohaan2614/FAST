@@ -3,6 +3,8 @@ import random
 from shared.agent_utils import Agent
 import functools
 
+participation_ratio = 0.2  # the percentage of participating clients in each round
+
 
 def client_sampling(
     sampling_type: str,
