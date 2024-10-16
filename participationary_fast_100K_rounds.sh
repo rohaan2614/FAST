@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 # Define the array of F values
-F_VALUES=(15000)
+F_VALUES=(18000 16000 14000 12000 10000 5000 1000)
 LEARNING_RATE=0.01
 NUM_CLIENTS=100
 ROUND=100000
@@ -16,8 +16,8 @@ for F in "${F_VALUES[@]}"; do
 #SBATCH --partition=tier3
 #SBATCH --account=fl-het
 #SBATCH --mem=8G
-#SBATCH --time=1-00:00:00
-#SBATCH --gres=gpu:a100:2
+#SBATCH --time=1-10:00:00
+#SBATCH --gres=gpu:h100:2
 #SBATCH --mail-user=slack:@rn7823
 #SBATCH --mail-type=ALL
 
