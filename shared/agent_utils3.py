@@ -11,7 +11,7 @@ args = get_parms("utils").parse_args()
 def generate_gaussian_matrix(d: int, 
                              device,
                              f: int = args.f,) -> torch.Tensor:
-    print('Building G on device:', device, torch.cuda.is_available())
+    # print('Building G on device:', device, torch.cuda.is_available())
     G = torch.randn(d, f//2, device=device)
     return G
 
@@ -101,6 +101,7 @@ class Agent:
         self.model_grad = torch.zeros_like(get_flatten_model_param(self.model))
         self.G1 = torch.zeros_like(get_flatten_model_param(self.model)).to(self.device_1)
         self.G2 = torch.zeros_like(get_flatten_model_param(self.model)).to(self.device_2)
+        self.error = torch.zeros_like(get_flatten_model_param(self.model)).to(self.device_1)
 
     def pull_G(self, server):
         self.G = server.G
@@ -195,16 +196,13 @@ class Server:
         self.G2 = generate_gaussian_matrix(d = d,
                                            device=self.device_2)
                 
-
-    def avg_clients(self, clients: list[Agent]):
-        print('Investigating Pre-existing Space Consumption:')
-        # print(torch.cuda.memory_summary())
+    def avg_clients(self, clients: list[Agent], p=args.p):
         if args.algo == "fedavg":
             for i, client in enumerate(clients):
                 print('Client:', i+1)
                 
                 # Move deltas to both GPUs
-                delta_1 = (client.model_grad).to(self.device_1)
+                delta_1 = client.model_grad.to(self.device_1) + client.error
                 delta_2 = delta_1.clone().to(self.device_2)
                 
                 # generate ws
@@ -226,7 +224,13 @@ class Server:
                 # sum d0_hat and d1_hat
                 Gw = Gw_1 + Gw2_on_device_1
                 
-                mse = torch.mean((delta_1 - Gw) ** 2)
+                # scaling_factor = delta_1.norm() / Gw.norm()
+                # Gw_scaled = Gw * scaling_factor
+                
+                # client.error = (delta_1 - Gw_scaled)
+                client.error = Gw - delta_1
+                
+                mse = torch.mean(client.error ** 2)
                 print('MSE:', mse)
                 
                 # move to cpu & release CUDA space

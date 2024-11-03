@@ -215,7 +215,6 @@ with tqdm(total=args.round, desc=f"Training:") as t:
 
 
 eval_loss, eval_acc = server.eval(test_loader)
-# print(f"Evaluation(final round): {eval_loss=:.3f} {eval_acc=:.3f}")
 if args.log_to_tensorboard is not None:
     writer.add_scalar("Loss/test", eval_loss, round)
     writer.add_scalar("Accuracy/test", eval_acc, round)

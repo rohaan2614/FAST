@@ -13,6 +13,7 @@ def get_parms(dataset):
     parser.add_argument("--round", type=int, default=5001, help="Communication rounds")
     parser.add_argument("--q", type=float, default=1, help="Probability of snapshot")
     parser.add_argument("--f", type=int, default=50, help="The q in the GA algorithm")
+    parser.add_argument("--p", type=float, default=1e3, help="denominator coefficient for error feedback compensation")
     parser.add_argument(
         "--gamma", type=float, default=0.7, help="parameter for adaptive FAST"
     )
