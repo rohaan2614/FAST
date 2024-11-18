@@ -4,6 +4,8 @@ import random
 from torch.utils.data import Dataset
 from config import get_parms
 from shared.compression import quantize, dequantize_tensor, top_k, random_k
+from io import BlockingIOError
+import json
 
 args = get_parms("utils").parse_args()
 
@@ -196,13 +198,18 @@ class Server:
         self.G2 = generate_gaussian_matrix(d = d,
                                            device=self.device_2)
                 
-    def avg_clients(self, clients: list[Agent], p=args.p):
+    def avg_clients(self, clients: list[Agent], round_number, write_params=False):
         if args.algo == "fedavg":
             for i, client in enumerate(clients):
-                print('Client:', i+1)
+                try:
+                    print(f'Client {i+1}', end=' ', flush=True)
+                except BlockingIOError:
+                    pass
                 
                 # Move deltas to both GPUs
-                delta_1 = client.model_grad.to(self.device_1) + client.error
+                delta_1 = client.model_grad.to(self.device_1)
+                if round_number >= 2.5e4:
+                    delta_1 -=  client.error
                 delta_2 = delta_1.clone().to(self.device_2)
                 
                 # generate ws
@@ -224,14 +231,14 @@ class Server:
                 # sum d0_hat and d1_hat
                 Gw = Gw_1 + Gw2_on_device_1
                 
-                # scaling_factor = delta_1.norm() / Gw.norm()
-                # Gw_scaled = Gw * scaling_factor
-                
-                # client.error = (delta_1 - Gw_scaled)
-                client.error = Gw - delta_1
+                client.error = delta_1 - Gw
                 
                 mse = torch.mean(client.error ** 2)
-                print('MSE:', mse)
+                # print('MSE:', mse)
+                
+                Gw_norm = Gw.norm()
+                delta_norm = delta_1.norm()
+                print(f'MSE: {mse.item()}, L2 Norm Gw: {Gw_norm.item()}, L2 Norm delta {delta_norm.item()}')
                 
                 # move to cpu & release CUDA space
                 Gw_on_cpu = Gw.to(self.device)
@@ -247,6 +254,19 @@ class Server:
                                            device=self.device_1)
         self.G2 = generate_gaussian_matrix(d = d,
                                            device=self.device_2)
+        
+        # Write delta and Gw from the last client to a JSON file
+        if write_params:
+            params_data = {
+                "round": round_number,
+                "data": {
+                        "delta": delta_1.tolist(),
+                        "Gw": Gw_on_cpu.tolist()
+                    }
+            }
+            with open(f"params_round_{round_number}_EC.json", "w") as f:
+                json.dump(params_data, f, indent=4)
+                
 
     def eval(self, test_dataloader) -> tuple[float, float]:
         self.model.eval()

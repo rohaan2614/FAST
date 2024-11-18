@@ -13,7 +13,7 @@ from shared.agent_utils3 import local_update_selected_clients_fedavg
 from config import get_parms
 from fedlab.utils.dataset.partition import MNISTPartitioner, FMNISTPartitioner
 import preprocess
-import random
+from io import BlockingIOError
 import gc
 gc.enable()
 
@@ -168,7 +168,10 @@ else:
 print(args)
 with tqdm(total=args.round, desc=f"Training:") as t:
     for round in range(0, args.round):
-        print(f'Round {round+1}')
+        try:
+            print(f'Round {round+1}', end=' ', flush=True)
+        except BlockingIOError:
+            pass
         # Sample clients
         sampled_clients = client_sampling(
             server.determine_sampling(q, args.sampling_type),
@@ -183,7 +186,8 @@ with tqdm(total=args.round, desc=f"Training:") as t:
                 clients=sampled_clients, server=server, local_update=args.local_update
             )
             
-        server.avg_clients(sampled_clients)
+        write_params_flag = round > 0 and round % 1e3 == 0
+        server.avg_clients(sampled_clients, write_params=write_params_flag, round_number=round)
         
         # Evaluation and logging
         if args.log_to_tensorboard is not None:
